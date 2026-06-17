@@ -1,33 +1,16 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
 import google.generativeai as genai
 
 # ==========================================
 # 1. 페이지 및 기본 설정
 # ==========================================
-st.set_page_config(page_title="AI 수행평가 매니저", page_icon="📅", layout="wide")
-
-# 세션 상태 초기화 (데이터 저장용)
-if 'assessments' not in st.session_state:
-    st.session_state.assessments = []
+st.set_page_config(page_title="AI 스마트 분리수거 도우미", page_icon="♻️", layout="centered")
 
 # ==========================================
-# 2. 헬퍼 함수
+# 2. 헬퍼 함수 (AI API 호출)
 # ==========================================
-def calculate_dday(target_date):
-    """D-Day를 계산하는 함수"""
-    today = datetime.now().date()
-    delta = target_date - today
-    if delta.days == 0:
-        return "D-Day"
-    elif delta.days > 0:
-        return f"D-{delta.days}"
-    else:
-        return f"D+{abs(delta.days)} (마감됨)"
-
-def get_ai_strategy(data_list):
-    """Gemini API를 사용하여 대비 전략을 생성하는 함수"""
+def get_recycling_guide(item_name):
+    """Gemini API를 사용하여 분리수거 방법을 안내하는 함수"""
     try:
         # Secrets에서 API 키 가져오기
         api_key = st.secrets.get("GEMINI_API_KEY")
@@ -37,104 +20,66 @@ def get_ai_strategy(data_list):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash-lite')
         
-        # 프롬프트 구성
-        prompt = "다음은 현재 준비해야 할 수행평가 목록입니다:\n"
-        for item in data_list:
-            if item['상태'] != "완료":
-                prompt += f"- 과목: {item['과목']}, 내용: {item['평가 내용']}, 기한: {item['제출/평가일']}, 남은기간: {item['D-Day']}\n"
+        # 프롬프트 구성 (한국 분리배출 규정 강조)
+        prompt = f"""
+        당신은 대한민국 환경부 가이드라인을 완벽하게 숙지하고 있는 친절한 분리수거 전문가입니다.
+        사용자가 '{item_name}'을(를) 버리는 방법을 물어보았습니다.
         
-        prompt += "\n학생이 이 수행평가들을 성공적으로 마칠 수 있도록 남은 기간을 고려한 구체적인 준비 전략과 타임라인을 조언해주세요. 친절하고 격려하는 어조로 작성해주세요."
+        다음 규칙에 따라 3~4문장으로 명확하게 답변해 주세요:
+        1. 재활용이 가능한지, 아니면 일반 쓰레기(종량제 봉투)로 버려야 하는지 명확히 밝혀주세요.
+        2. 분리배출 시 주의할 점(예: 씻어서, 라벨을 떼고 등)을 포함해 주세요.
+        3. 친절하고 이해하기 쉬운 말투로 작성해 주세요.
+        """
         
         response = model.generate_content(prompt)
         return response.text
     
     except Exception as e:
-        return f"AI 응답 생성 중 오류가 발생했습니다: {e}"
+        return f"AI 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.\n(에러 상세: {e})"
 
 # ==========================================
 # 3. 화면 UI 구성
 # ==========================================
-st.title("📅 AI 수행평가 매니저")
-st.markdown("수행평가 일정을 꼼꼼하게 기록하고, **AI에게 맞춤형 준비 전략**을 받아보세요!")
+st.title("♻️ AI 스마트 분리수거 도우미")
+st.markdown("헷갈리는 쓰레기 버리는 방법, 이제 AI 전문가에게 물어보세요!")
 
-# 사이드바: 입력 폼
-with st.sidebar:
-    st.header("새로운 평가 등록")
-    with st.form("add_assessment_form"):
-        subject = st.text_input("과목명", placeholder="예: 정보, 국어, 과학")
-        task = st.text_input("평가 내용", placeholder="예: 파이썬 데이터 분석 보고서")
-        deadline = st.date_input("제출/평가일")
-        status = st.selectbox("진행 상태", ["준비 전", "진행 중", "완료"])
-        
-        submitted = st.form_submit_button("일정 추가하기")
-        
-        if submitted:
-            if subject and task:
-                new_entry = {
-                    "id": len(st.session_state.assessments),
-                    "과목": subject,
-                    "평가 내용": task,
-                    "제출/평가일": deadline,
-                    "D-Day": calculate_dday(deadline),
-                    "상태": status
-                }
-                st.session_state.assessments.append(new_entry)
-                st.success(f"'{subject}' 수행평가가 추가되었습니다!")
-                st.rerun()
-            else:
-                st.warning("과목명과 평가 내용을 모두 입력해주세요.")
+# 탭 구성
+tab1, tab2 = st.tabs(["🔍 어떻게 버릴까?", "🧠 분리수거 상식 퀴즈"])
 
-    if st.button("목록 전체 초기화", type="primary", use_container_width=True):
-        st.session_state.assessments = []
-        st.rerun()
-
-# 메인 화면: 탭 구성
-tab1, tab2 = st.tabs(["📋 전체 일정 보기", "🤖 AI 대비 전략 받기"])
-
+# --- 탭 1: AI 분리수거 검색기 ---
 with tab1:
-    st.subheader("현재 등록된 수행평가")
-    if not st.session_state.assessments:
-        st.info("왼쪽 사이드바에서 새로운 수행평가 일정을 등록해주세요.")
-    else:
-        # 최신 D-Day 업데이트를 위해 리스트 갱신
-        for item in st.session_state.assessments:
-            item["D-Day"] = calculate_dday(item["제출/평가일"])
-            
-        # 데이터프레임으로 변환하여 표시 (id 컬럼 제외)
-        df = pd.DataFrame(st.session_state.assessments)
-        display_df = df.drop(columns=['id'])
-        
-        # 상태 업데이트를 위해 data_editor 사용
-        edited_df = st.data_editor(
-            display_df,
-            column_config={
-                "상태": st.column_config.SelectboxColumn(
-                    "상태",
-                    help="현재 진행 상태를 선택하세요",
-                    options=["준비 전", "진행 중", "완료"],
-                    required=True,
-                )
-            },
-            disabled=["과목", "평가 내용", "제출/평가일", "D-Day"],
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        # 사용자가 상태를 변경하면 session_state에 반영
-        if not edited_df.equals(display_df):
-            for index, row in edited_df.iterrows():
-                st.session_state.assessments[index]['상태'] = row['상태']
-
-with tab2:
-    st.subheader("AI 맞춤형 준비 계획")
-    pending_tasks = [task for task in st.session_state.assessments if task['상태'] != "완료"]
+    st.subheader("버리기 애매한 물건을 입력해 보세요.")
+    item_input = st.text_input(
+        "물품 이름", 
+        placeholder="예: 치킨 뼈, 컵라면 용기, 깨진 화분, 보온병"
+    )
     
-    if not pending_tasks:
-        st.success("현재 준비해야 할 수행평가가 없습니다! 훌륭합니다. 🎉")
-    else:
-        st.info(f"현재 완료되지 않은 수행평가가 **{len(pending_tasks)}개** 있습니다. AI에게 우선순위와 준비 전략을 물어보세요.")
-        if st.button("✨ AI 대비 전략 생성하기", type="primary"):
-            with st.spinner("AI가 최적의 타임라인을 계산하고 있습니다..."):
-                strategy = get_ai_strategy(pending_tasks)
-                st.markdown("---")
-                st.markdown(strategy)
+    if st.button("AI에게 물어보기", type="primary", use_container_width=True):
+        if item_input.strip():
+            with st.spinner(f"'{item_input}' 버리는 방법을 찾고 있습니다... 🧐"):
+                guide = get_recycling_guide(item_input)
+                st.success("안내를 확인해 주세요!")
+                st.info(guide)
+        else:
+            st.warning("버리려는 물품의 이름을 먼저 입력해 주세요.")
+
+# --- 탭 2: 분리수거 상식 퀴즈 ---
+with tab2:
+    st.subheader("당신의 분리수거 점수는? O/X 퀴즈")
+    st.markdown("정답을 확인하려면 아래 질문을 클릭해 주세요.")
+    
+    with st.expander("Q1. 기름이 잔뜩 묻어 지워지지 않는 피자 박스는 종이류로 배출한다?"):
+        st.error("**X (일반 쓰레기)**")
+        st.write("음식물이 묻어 오염된 종이는 재활용이 어렵습니다. 잘게 찢어서 종량제 봉투에 버려야 합니다.")
+        
+    with st.expander("Q2. 닭 뼈나 돼지 뼈는 음식물 쓰레기로 버려야 한다?"):
+        st.error("**X (일반 쓰레기)**")
+        st.write("동물의 뼈, 조개껍데기, 달걀 껍데기 등은 동물이 먹을 수 없으므로 일반 쓰레기(종량제 봉투)로 배출해야 합니다.")
+        
+    with st.expander("Q3. 펌프형 용기(샴푸 등)는 그대로 플라스틱으로 배출한다?"):
+        st.error("**X (분리 후 배출)**")
+        st.write("펌프 내부에는 철수프링 등 다른 재질이 섞여 있습니다. 펌프 부분은 일반 쓰레기로 버리고, 몸통 부분만 씻어서 플라스틱으로 배출하는 것이 좋습니다.")
+
+    with st.expander("Q4. 깨진 유리컵은 신문지에 싸서 종량제 봉투에 버린다?"):
+        st.success("**O (정답)**")
+        st.write("깨진 유리는 재활용이 안 되며 수거하시는 분이 다칠 수 있습니다. 신문지 등으로 두껍게 싼 뒤 '깨진 유리 주의'라고 적어 종량제 봉투(또는 전용 마대)에 버려야 합니다.")
